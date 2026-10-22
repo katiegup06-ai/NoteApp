@@ -8,7 +8,7 @@ NotesApp is a small grades application built with Flask and PostgreSQL. Students
 
 This report extends our earlier data-flow diagram and STRIDE table. We also checked the application's source for login, ping and logging, and its Docker configuration. Some entries describe weaknesses visible in the code; others depend on deployment conditions. The scores are estimates, not results of attack or load tests. The report assesses the teaching application before the separate comment-encryption lab changes.
 
-![Original NotesApp data-flow diagram](notesapp-original-dfd.png)
+![Original NotesApp data-flow diagram](notesapp-original-dfd.png.png)
 
 The two vertical dotted lines in our original diagram represent the trust boundaries:
 
@@ -21,7 +21,7 @@ The image keeps our original F1–F9 flows. F1 shows student login; the applicat
 
 ### Additional flows checked against the source
 
-![Additional NotesApp flows and deployment access](notesapp-additional-flows.png)
+![Additional NotesApp flows and deployment access](notesapp-additional-flows.png.jpg)
 
 The supplementary diagram adds the login response, administrator ping operation and log writes without changing the original image or its numbering.
 
