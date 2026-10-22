@@ -12,3 +12,5 @@ venv/
 # Local env overrides
 .env
 .env.local
+
+/nginx/certs/
