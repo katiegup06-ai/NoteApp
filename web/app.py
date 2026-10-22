@@ -15,6 +15,9 @@ import subprocess
 
 import psycopg2
 import psycopg2.extras
+from cryptography.exceptions import InvalidTag
+from comment_crypto import load_key, encrypt_comment, decrypt_comment
+from export_integrity import sha256_hex, make_export_bundle
 from flask import (
     Flask, request, session, redirect, url_for,
     render_template, Response, jsonify, abort,
@@ -31,6 +34,7 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "dev-session-key")
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
+COMMENT_KEY = load_key()
 
 LOG_FILE = os.environ.get("NOTESAPP_LOG", "/var/log/notesapp/app.log")
 
@@ -52,6 +56,21 @@ def get_db():
     )
     conn.autocommit = True
     return conn
+
+
+# --- Encrypted comments -------------------------------------------------------
+def _comment_for_display(note):
+    try:
+        return decrypt_comment(note["comment"], note["id"], COMMENT_KEY)
+    except (InvalidTag, ValueError):
+        app.logger.error("Comment verification failed for note %s", note["id"])
+        abort(500, description="Stored comment could not be verified.")
+
+
+def _decrypt_note_rows(notes):
+    for note in notes:
+        note["comment"] = _comment_for_display(note)
+    return notes
 
 
 # --- Minimal JWT (deliberately weak) ------------------------------------------
@@ -195,6 +214,7 @@ def dashboard():
     )
     notes = cur.fetchall()
     conn.close()
+    notes = _decrypt_note_rows(notes)
     return render_template("dashboard.html", notes=notes, token=session.get("token"))
 
 
@@ -218,6 +238,7 @@ def api_notes(note_id):
     conn.close()
     if not note:
         return jsonify({"error": "not found"}), 404
+    note["comment"] = _comment_for_display(note)
     note["grade"] = float(note["grade"]) if note["grade"] is not None else None
     return jsonify(note)
 
@@ -241,6 +262,7 @@ def teacher():
     cur.execute("SELECT id, username FROM users WHERE role = 'student' ORDER BY username")
     students = cur.fetchall()
     conn.close()
+    notes = _decrypt_note_rows(notes)
     return render_template("teacher.html", classes=classes, notes=notes, students=students)
 
 
@@ -255,20 +277,37 @@ def grades():
     grade = request.form.get("grade")
     comment = request.form.get("comment", "")
     conn = get_db()
-    cur = conn.cursor()
-    if note_id:
-        cur.execute(
-            "UPDATE notes SET grade = %s, comment = %s WHERE id = %s",
-            (grade, comment, note_id),
-        )
-    else:
-        cur.execute(
-            "INSERT INTO notes (student_id, class_id, grade, comment) "
-            "VALUES (%s, %s, %s, %s)",
-            (student_id, class_id, grade, comment),
-        )
-    conn.close()
-    log(f"grade write by {session.get('username')} note_id={note_id or 'new'}")
+    try:
+        # One transaction keeps the new ID and its encrypted comment together.
+        conn.autocommit = False
+        with conn.cursor() as cur:
+            if note_id:
+                note_id = int(note_id)
+                encrypted = encrypt_comment(comment, note_id, COMMENT_KEY)
+                cur.execute(
+                    "UPDATE notes SET grade = %s, comment = %s WHERE id = %s",
+                    (grade, encrypted, note_id),
+                )
+            else:
+                # Obtain the generated ID without ever writing the plaintext.
+                cur.execute(
+                    "INSERT INTO notes (student_id, class_id, grade, comment) "
+                    "VALUES (%s, %s, %s, NULL) RETURNING id",
+                    (student_id, class_id, grade),
+                )
+                note_id = cur.fetchone()["id"]
+                encrypted = encrypt_comment(comment, note_id, COMMENT_KEY)
+                cur.execute(
+                    "UPDATE notes SET comment = %s WHERE id = %s",
+                    (encrypted, note_id),
+                )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    log(f"grade write by {session.get('username')} note_id={note_id}")
     return redirect(url_for("teacher"))
 
 
@@ -281,7 +320,7 @@ def export_csv():
     cur = conn.cursor()
     if class_id:
         cur.execute(
-            "SELECT u.username AS student, c.name AS class, n.grade, n.comment "
+            "SELECT n.id, u.username AS student, c.name AS class, n.grade, n.comment "
             "FROM notes n JOIN users u ON u.id = n.student_id "
             "JOIN classes c ON c.id = n.class_id WHERE n.class_id = %s "
             "ORDER BY u.username",
@@ -289,21 +328,37 @@ def export_csv():
         )
     else:
         cur.execute(
-            "SELECT u.username AS student, c.name AS class, n.grade, n.comment "
+            "SELECT n.id, u.username AS student, c.name AS class, n.grade, n.comment "
             "FROM notes n JOIN users u ON u.id = n.student_id "
             "JOIN classes c ON c.id = n.class_id ORDER BY c.name, u.username"
         )
     rows = cur.fetchall()
     conn.close()
+    rows = _decrypt_note_rows(rows)
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["student", "class", "grade", "comment"])
     for r in rows:
         writer.writerow([r["student"], r["class"], r["grade"], r["comment"]])
-    return Response(
-        buf.getvalue(), mimetype="text/csv",
-        headers={"Content-Disposition": "attachment; filename=grades.csv"},
-    )
+    # Hash exactly the UTF-8 bytes sent to the user, including CSV newlines.
+    csv_bytes = buf.getvalue().encode("utf-8")
+    digest = sha256_hex(csv_bytes)
+    headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+    if request.args.get("bundle") == "1":
+        headers["Content-Disposition"] = "attachment; filename=grades-with-sha256.zip"
+        headers["X-CSV-SHA256"] = digest
+        return Response(make_export_bundle(csv_bytes), mimetype="application/zip", headers=headers)
+    headers["Content-Disposition"] = "attachment; filename=grades.csv"
+    headers["X-Content-SHA256"] = digest
+    return Response(csv_bytes, mimetype="text/csv", headers=headers)
+
+
+@app.route("/verify-export")
+def verify_export():
+    if not login_required("teacher"):
+        return redirect(url_for("login"))
+    # Verification runs locally in the browser; no grade file is uploaded.
+    return render_template("verify_export.html")
 
 
 @app.route("/admin")

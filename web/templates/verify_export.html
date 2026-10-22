@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h1>Verify an exported file</h1>
+  <p>Extract your export ZIP, then select <strong>grades.csv</strong> and
+    <strong>grades.csv.sha256</strong> from the same export.</p>
+  <p>The check runs on your device. Your files are not uploaded.</p>
+  <form id="verify-export-form">
+    <label>Exported CSV file
+      <input id="csv-file" type="file" accept=".csv" required>
+    </label>
+    <label>SHA-256 checksum file
+      <input id="checksum-file" type="file" accept=".sha256,.txt" required>
+    </label>
+    <button id="verify-button" type="submit">Verify SHA-256</button>
+  </form>
+  <p id="verify-result" role="status" aria-live="polite"></p>
+  <pre id="verify-details" hidden></pre>
+  <p class="small">A match means the file matches the supplied checksum. Keep the original
+    checksum from a trusted source: replacing both files can still produce a match.</p>
+  <p><a href="{{ url_for('teacher') }}">Back to grades</a></p>
+</div>
+<script src="{{ url_for('static', filename='export_verify.js') }}" defer></script>
+{% endblock %}
