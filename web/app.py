@@ -13,6 +13,8 @@ import base64
 import hashlib
 import subprocess
 
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError, InvalidHash
 import psycopg2
 import psycopg2.extras
 from cryptography.exceptions import InvalidTag
@@ -35,6 +37,11 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "dev-session-key")
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 COMMENT_KEY = load_key()
+ph = PasswordHasher()
+
+
+def is_argon2_hash(value: str) -> bool:
+    return value.startswith("$argon2")
 
 LOG_FILE = os.environ.get("NOTESAPP_LOG", "/var/log/notesapp/app.log")
 
@@ -163,10 +170,11 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "")
         password = request.form.get("password", "")
-        # Flaw #8: SQL injection. Query built by string concatenation, no params.
+
+        # Username concatenation stays for the later SQL injection lab.
         query = (
-            "SELECT id, username, role FROM users "
-            "WHERE username = '" + username + "' AND password = '" + password + "'"
+            "SELECT id, username, role, password FROM users "
+            "WHERE username = '" + username + "'"
         )
         conn = get_db()
         cur = conn.cursor()
@@ -174,23 +182,46 @@ def login():
             cur.execute(query)
             row = cur.fetchone()
         except Exception as e:
-            # Keep the raw error visible - helps the SQLi session.
             error = f"Query error: {e}"
             row = None
-        conn.close()
+
+        authenticated = False
         if row:
+            stored = row["password"]
+            if is_argon2_hash(stored):
+                try:
+                    ph.verify(stored, password)
+                    authenticated = True
+                except (VerifyMismatchError, InvalidHash):
+                    authenticated = False
+            else:
+                if stored == password:
+                    authenticated = True
+                    new_hash = ph.hash(password)
+                    cur.execute(
+                        "UPDATE users SET password = %s WHERE id = %s",
+                        (new_hash, row["id"]),
+                    )
+                    log(f"upgraded {row['username']} to argon2")
+
+        conn.close()
+
+        if authenticated:
             session["user_id"] = row["id"]
             session["username"] = row["username"]
             session["role"] = row["role"]
-            # Issue a weak JWT the dashboard uses to call the API.
             session["token"] = make_jwt({
-                "user_id": row["id"], "username": row["username"], "role": row["role"],
+                "user_id": row["id"],
+                "username": row["username"],
+                "role": row["role"],
             })
             log(f"login success user={row['username']} role={row['role']}")
             return redirect(url_for("index"))
+
         if not error:
             error = "Invalid credentials."
         log(f"login failure username={username!r}")
+
     return render_template("login.html", error=error)
 
 
