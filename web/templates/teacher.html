@@ -6,7 +6,7 @@
     {% for c in classes %}
     <li>{{ c.name }}
       <a class="small" href="{{ url_for('export_csv', class_id=c.id) }}">export CSV</a>
-      <a class="small" href="{{ url_for('export_csv', class_id=c.id, bundle=1) }}">CSV + SHA-256</a>
+      <a class="small" href="{{ url_for('export_csv', class_id=c.id, bundle=1) }}">CSV +HMAC-SHA256 </a>
     </li>
     {% endfor %}
   </ul>
@@ -14,8 +14,8 @@
 
 <div class="card">
   <h2>Export and verify grades</h2>
-  <p>Download the CSV and its SHA-256 checksum together, then extract the ZIP to verify the files.</p>
-  <p><a href="{{ url_for('export_csv', bundle=1) }}">Download all grades + SHA-256</a></p>
+  <p>Download the CSV and its HMAC-SHA256 checksum together, then extract the ZIP to verify the files.</p>
+  <p><a href="{{ url_for('export_csv', bundle=1) }}">Download all grades + HMAC-SHA256</a></p>
   <p><a href="{{ url_for('verify_export') }}">Verify an exported file</a></p>
 </div>
 

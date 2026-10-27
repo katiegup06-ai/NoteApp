@@ -13,13 +13,16 @@ import base64
 import hashlib
 import subprocess
 
+from werkzeug.exceptions import RequestEntityTooLarge
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHash
 import psycopg2
 import psycopg2.extras
 from cryptography.exceptions import InvalidTag
 from comment_crypto import load_key, encrypt_comment, decrypt_comment
-from export_integrity import sha256_hex, make_export_bundle
+from export_integrity import (
+    hmac_sha256_hex, make_export_bundle, load_hmac_key, verify_bytes,
+)
 from flask import (
     Flask, request, session, redirect, url_for,
     render_template, Response, jsonify, abort,
@@ -35,8 +38,10 @@ JWT_SECRET = os.environ.get("JWT_SECRET", "s3cr3t")
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-session-key")
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
 app.secret_key = SECRET_KEY
 COMMENT_KEY = load_key()
+load_hmac_key()
 ph = PasswordHasher()
 
 
@@ -371,26 +376,87 @@ def export_csv():
     writer.writerow(["student", "class", "grade", "comment"])
     for r in rows:
         writer.writerow([r["student"], r["class"], r["grade"], r["comment"]])
-    # Hash exactly the UTF-8 bytes sent to the user, including CSV newlines.
+       # Authenticate the exact UTF-8 bytes of the CSV.
     csv_bytes = buf.getvalue().encode("utf-8")
-    digest = sha256_hex(csv_bytes)
-    headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+    digest = hmac_sha256_hex(csv_bytes)
+    headers = {
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+
     if request.args.get("bundle") == "1":
-        headers["Content-Disposition"] = "attachment; filename=grades-with-sha256.zip"
-        headers["X-CSV-SHA256"] = digest
-        return Response(make_export_bundle(csv_bytes), mimetype="application/zip", headers=headers)
+        headers["Content-Disposition"] = (
+            "attachment; filename=grades-with-hmac-sha256.zip"
+        )
+        headers["X-CSV-HMAC-SHA256"] = digest
+        return Response(
+            make_export_bundle(csv_bytes),
+            mimetype="application/zip",
+            headers=headers,
+        )
+
     headers["Content-Disposition"] = "attachment; filename=grades.csv"
-    headers["X-Content-SHA256"] = digest
+    headers["X-Content-HMAC-SHA256"] = digest
     return Response(csv_bytes, mimetype="text/csv", headers=headers)
 
 
-@app.route("/verify-export")
+@app.route("/verify-export", methods=["GET", "POST"])
 def verify_export():
     if not login_required("teacher"):
         return redirect(url_for("login"))
-    # Verification runs locally in the browser; no grade file is uploaded.
-    return render_template("verify_export.html")
 
+    matches = None
+    error = None
+    status = 200
+
+    if request.method == "POST":
+        try:
+            csv_file = request.files.get("csv_file")
+            checksum_file = request.files.get("checksum_file")
+
+            if (
+                csv_file is None
+                or not csv_file.filename
+                or checksum_file is None
+                or not checksum_file.filename
+            ):
+                raise ValueError("Choose both the CSV and HMAC files.")
+
+            csv_limit = 5 * 1024 * 1024
+            csv_bytes = csv_file.stream.read(csv_limit + 1)
+            checksum_bytes = checksum_file.stream.read(4097)
+
+            if len(csv_bytes) > csv_limit or len(checksum_bytes) > 4096:
+                raise RequestEntityTooLarge()
+
+            checksum_text = checksum_bytes.decode("utf-8")
+            matches = verify_bytes(
+                csv_bytes,
+                checksum_text,
+                filename=csv_file.filename,
+            )
+
+        except RequestEntityTooLarge:
+            error = "Upload too large. The CSV limit is 5 MiB."
+            status = 413
+
+        except UnicodeError:
+            error = "The HMAC file must contain valid UTF-8 text."
+            status = 400
+
+        except ValueError as exc:
+            error = str(exc)
+            status = 400
+
+    return (
+        render_template(
+            "verify_export.html",
+            matches=matches,
+            error=error,
+        ),
+        status,
+        {"Cache-Control": "no-store"},
+    )
 
 @app.route("/admin")
 def admin():

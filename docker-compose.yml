@@ -23,6 +23,7 @@ services:
       DB_NAME: notesapp
       DB_USER: notesapp
       NOTESAPP_KEY_B64: ${NOTESAPP_KEY_B64:?Missing NOTESAPP_KEY_B64}
+      EXPORT_HMAC_KEY_B64: ${EXPORT_HMAC_KEY_B64:?Missing EXPORT_HMAC_KEY_B64}
       POSTGRES_PASSWORD: notesapp_pg_pw_2024
       JWT_SECRET: s3cr3t
       SECRET_KEY: dev-session-key

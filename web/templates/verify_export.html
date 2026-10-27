@@ -3,22 +3,36 @@
 <div class="card">
   <h1>Verify an exported file</h1>
   <p>Extract your export ZIP, then select <strong>grades.csv</strong> and
-    <strong>grades.csv.sha256</strong> from the same export.</p>
-  <p>The check runs on your device. Your files are not uploaded.</p>
-  <form id="verify-export-form">
+    <strong>grades.csv.hmac-sha256</strong> from the same export.</p>
+  <p>NotesApp checks the files on the server. The secret key stays on the server.</p>
+
+  <form id="verify-export-form"
+        method="post"
+        action="{{ url_for('verify_export') }}"
+        enctype="multipart/form-data">
     <label>Exported CSV file
-      <input id="csv-file" type="file" accept=".csv" required>
+      <input id="csv-file" name="csv_file"
+             type="file" accept=".csv" required>
     </label>
-    <label>SHA-256 checksum file
-      <input id="checksum-file" type="file" accept=".sha256,.txt" required>
+    <label>HMAC-SHA256 file
+      <input id="checksum-file" name="checksum_file"
+             type="file" accept=".hmac-sha256,.txt" required>
     </label>
-    <button id="verify-button" type="submit">Verify SHA-256</button>
+    <button id="verify-button" type="submit">Verify HMAC-SHA256</button>
   </form>
-  <p id="verify-result" role="status" aria-live="polite"></p>
-  <pre id="verify-details" hidden></pre>
-  <p class="small">A match means the file matches the supplied checksum. Keep the original
-    checksum from a trusted source: replacing both files can still produce a match.</p>
+
+  <p id="verify-result" role="status" aria-live="polite">
+    {% if error %}
+      {{ error }}
+    {% elif matches is not none %}
+      {% if matches %}
+        PASS - the file matches its HMAC-SHA256.
+      {% else %}
+        FAIL - the file does not match its HMAC-SHA256.
+      {% endif %}
+    {% endif %}
+  </p>
+
   <p><a href="{{ url_for('teacher') }}">Back to grades</a></p>
 </div>
-<script src="{{ url_for('static', filename='export_verify.js') }}" defer></script>
 {% endblock %}

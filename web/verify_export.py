@@ -11,10 +11,10 @@ from export_integrity import verify_bytes
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Check a CSV file against its SHA-256 checksum."
+        description="Check a CSV file against its  checksum."
     )
     parser.add_argument("csv", type=Path, help="The original downloaded CSV file")
-    parser.add_argument("checksum", type=Path, help="The downloaded .sha256 file")
+    parser.add_argument("checksum", type=Path, help="The downloaded .hmac-sha256 file")
     args = parser.parse_args(argv)
     try:
         data = args.csv.read_bytes()
@@ -27,9 +27,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
     if not matches:
-        print(f"FAIL: SHA-256 does not match {args.csv.name}.")
+        print(f"FAIL: HMAC-SHA256 does not match {args.csv.name}.")
         return 1
-    print(f"PASS: SHA-256 matches {args.csv.name}.")
+    print(f"PASS: HMAC-SHA256 matches {args.csv.name}.")
     return 0
 
 

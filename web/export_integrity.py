@@ -1,20 +1,20 @@
-"""SHA-256 checksums for the exact bytes of a CSV export.
 
-The checksum detects a changed file. It is not a digital signature: someone
-who can replace both the CSV and its checksum can create a matching pair.
-"""
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import hmac
 import io
+import os
 import re
 import zipfile
 
 
+KEY_ENV = "EXPORT_HMAC_KEY_B64"
 EXPORT_FILENAME = "grades.csv"
-CHECKSUM_FILENAME = EXPORT_FILENAME + ".sha256"
+CHECKSUM_FILENAME = "grades.csv.hmac-sha256"
 
 
 def _validate_filename(filename: str) -> None:
@@ -30,15 +30,31 @@ def _validate_filename(filename: str) -> None:
         raise ValueError("Checksum filename must be a simple filename without a path.")
 
 
-def sha256_hex(data: bytes) -> str:
-    """Return the lowercase SHA-256 digest of the original bytes."""
-    return hashlib.sha256(data).hexdigest()
+def load_hmac_key() -> bytes:
+    value = os.environ.get(KEY_ENV)
+    if not value:
+        raise ValueError(f"Missing {KEY_ENV}")
+
+    try:
+        key = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError(f"{KEY_ENV} must contain valid Base64") from None
+
+    if len(key) != 32:
+        raise ValueError(f"{KEY_ENV} must decode to 32 bytes")
+
+    return key
+
+
+def hmac_sha256_hex(data: bytes) -> str:
+    """Calculate HMAC-SHA256 using the secret key."""
+    return hmac.new(load_hmac_key(), data, hashlib.sha256).hexdigest()
 
 
 def make_checksum(data: bytes, filename: str = EXPORT_FILENAME) -> str:
     """Create one sha256sum-style record with a terminating newline."""
     _validate_filename(filename)
-    return f"{sha256_hex(data)}  {filename}\n"
+    return f"{hmac_sha256_hex(data)}  {filename}\n"
 
 
 def parse_checksum(text: str, expected_filename: str = EXPORT_FILENAME) -> str:
@@ -72,8 +88,7 @@ def verify_bytes(
 ) -> bool:
     """Return False for changed bytes; raise ValueError for invalid metadata."""
     expected = parse_checksum(checksum_text, expected_filename=filename)
-    return hmac.compare_digest(sha256_hex(data), expected)
-
+    return hmac.compare_digest(hmac_sha256_hex(data), expected)
 
 def make_export_bundle(data: bytes) -> bytes:
     """Put the same CSV byte snapshot and its checksum into one ZIP file."""
