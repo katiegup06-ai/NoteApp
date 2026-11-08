@@ -25,7 +25,7 @@ services:
       NOTESAPP_KEY_B64: ${NOTESAPP_KEY_B64:?Missing NOTESAPP_KEY_B64}
       EXPORT_HMAC_KEY_B64: ${EXPORT_HMAC_KEY_B64:?Missing EXPORT_HMAC_KEY_B64}
       POSTGRES_PASSWORD: notesapp_pg_pw_2024
-      JWT_SECRET: s3cr3t
+      JWT_SECRET: ${JWT_SECRET:?Missing JWT_SECRET}
       SECRET_KEY: dev-session-key
     ports:
       - "8080:5000"
