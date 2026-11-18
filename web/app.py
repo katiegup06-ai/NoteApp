@@ -184,15 +184,15 @@ def login():
         username = request.form.get("username", "")
         password = request.form.get("password", "")
 
-        # Username concatenation stays for the later SQL injection lab.
+        # Use a parameterised query so username is treated as data.
         query = (
             "SELECT id, username, role, password FROM users "
-            "WHERE username = '" + username + "'"
+            "WHERE username = %s"
         )
         conn = get_db()
         cur = conn.cursor()
         try:
-            cur.execute(query)
+            cur.execute(query, (username,))
             row = cur.fetchone()
         except Exception as e:
             error = f"Query error: {e}"
@@ -494,11 +494,13 @@ def admin_ping():
     if not login_required("admin"):
         return redirect(url_for("login"))
     host = request.form.get("host", "")
-    # Host is concatenated straight into a shell command.
-    cmd = "ping -c 1 " + host
+        # Pass host as one argument; do not invoke a shell.
     try:
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=10,
+            ["ping", "-c", "1", host],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         output = result.stdout + result.stderr
     except Exception as e:
