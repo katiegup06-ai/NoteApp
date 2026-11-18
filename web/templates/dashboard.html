@@ -12,7 +12,7 @@
         <td>{{ n.class_name }}</td>
         <td>{{ n.grade }}</td>
         {# Flaw #10: comment rendered as rich text, autoescaping OFF. #}
-        <td>{% autoescape false %}{{ n.comment }}{% endautoescape %}</td>
+                <td>{{ n.comment }}</td>
       </tr>
       {% endfor %}
     </tbody>
